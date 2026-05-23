@@ -8,40 +8,82 @@
 
 
 Solution solve_pde(ProblemData d){
+    // MPI_Initialize(int argc, char* argv[]);
+    // int rank, size;
+    // MPI_Comm_rank(&rank);
+    // MPI_Comm_size(&size);
+
+    // int n;
+    // if (rank == 0) {
+    //      std::cout << "Type the number of elements desired: "
+    //      std::cin >> n;
+    //}
+    // sostituire questa riga che permette solo dimensioni pari della griglia
     int grid_dimension = std::pow(2,d.nref)+1;
+    // int grid_dimension = n;
     double h = (d.x1-d.x0) / (grid_dimension-1);
 
-    
+    // questi saranno i vettori global
     Vector u1(grid_dimension * grid_dimension,0);
     Vector u0(grid_dimension * grid_dimension,0);
+    // MPI_Bcast(&u1, grid_dimension * grid_dimension, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    // MPI_Bcast(&u0, grid_dimension * grid_dimension, MPI_DOUBLE, 0, MPI_COMM_WORLD);
     std::cout << grid_dimension << std::endl;
     int iterations = 0;
+    // MPI_Bcast(&iterations, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
+    // questo sarà l'errore globale
     double error = d.tol + 1;
+    // MPI_Bcast(&error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
+    // questa sarà la griglia globale
     std::vector<std::vector<double>> grid(grid_dimension * grid_dimension);
+    // std::vector<std::vector<double>> global_grid( ... );
 
-    for(int i = 0;i < grid_dimension;i++){
-            for(int j = 0;j < grid_dimension;j++){
+    // per implementare la divisione delle righe tra i processi anche se le righe (e quindi le colonne sono dispari), si usa la strategia:
+    // int proc = grid_dimension / size;
+    // int remainder = grid_dimension % size;
+    // std::vector<int> rows_to_rank(size, proc);
+    // while (remainder > 0) {
+    //      rows_to_rank[remainder] += 1;
+    //      remainder--;
+    //}
+    // MPI_Bcast(&rows_to_rank, 4, MPI_INT, 0, MPI_COMM_WORLD);
+    // in questo modo creo un vettore contenente quante righe assegnare ad ogni processo e poi broadcasto il vettore. seppur questo vettore non 
+    // pesa molto, può essere inutile che tutti i processi conoscano tutte le righe per ogni processo: si può fare solo Send e Receive tipo:
+    // int local_rows;
+    // if (rank == 0) {
+    //      MPI_Send(&rows_to_rank[rank - 1], 1, MPI_INT, rank, 0, MPI_COMM_WORLD);
+    //      MPI_Recv(&local_rows, 1, MPI_INT, 0, 0, MPI_STATUS_IGNORE);
+    // }
+    // 
+    // int local_cols = grid_dimension;
+    // MPI_Bcast(&local_cols, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    //
+    // 
+
+    for(int i = 0;i < grid_dimension;i++){ // sostituire grid_dimension con local_rows
+            for(int j = 0;j < grid_dimension;j++){ // sostituire grid_dimension con local_cols (== grid_dimension)
                 grid[i * grid_dimension + j]={d.x0 + i * h, d.y0 + j * h};
             }
         }
 
 
 
-
+    // bisogna broadcastare la tolleranza
     while(error > d.tol and iterations<d.max_iter){
         double sum = 0;
-        for(int i = 1;i < grid_dimension - 1;i++){
-            for(int j = 1;j < grid_dimension - 1;j++){
+        for(int i = 1;i < grid_dimension - 1;i++){ // sostituire grid_dimension con local_rows
+            for(int j = 1;j < grid_dimension - 1;j++){ // sostituire grid_dimension con local_cols (== grid_dimension)
                 u1[i * grid_dimension + j] = (0.25) * (u0[(i + 1) * grid_dimension + j] +u0[(i - 1) * grid_dimension + j]
                                                              +u0[i * grid_dimension + j + 1] +u0[i * grid_dimension + j - 1] 
                                                              +d.f(grid[i * grid_dimension + j])* h * h);
                 sum += std::pow(u1[i * grid_dimension + j] - u0[i * grid_dimension + j],2);
             }
         }
-        
+        // MPI_Allreduce(&sum, MPI_IN_PLACE, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         error = std::sqrt(h*sum);
+        // MPI_Allreduce(&error, MPI_IN_PLACE, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
         u0=u1;
         iterations++;
@@ -55,6 +97,7 @@ Solution solve_pde(ProblemData d){
     s.grid_dimension=grid_dimension;
     s.h=h;
     return s;
+    // MPI_Finalize();
 }
 
 
