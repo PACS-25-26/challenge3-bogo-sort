@@ -82,13 +82,19 @@ Solution solve_pde(ProblemData d){
             }
         }
         error = std::sqrt(h*sum);
+    //  il rank 0 non ha rank precedenti
     //  if (rank != 0) {
+    //      devo inviare la prima riga di u1 del mio rank al rank precedente
     //      MPI_Send(&u1[local_rows * rank * grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
+    //      devo ricevere l'ultima riga di u1 del rank precedente e memorizzarla nella riga di u1 precedente alla prima riga occupata
     //      MPI_Recv(&u1[local_rows * rank * grid_dimension - grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     //  }
+    // il rank massimo non ha rank successivi
     // if (rank != size - 1) {
-    //      MPI_Send(&u1[local_rows * rank * grid_dimension + (local_rows - 1) * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD)
-    //      MPI_Recv(&u1[local_rows * rank * grid_dimension + local_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE)
+    //      devo inviare l'ultima riga di u1 del mio rank al rank successivo
+    //      MPI_Send(&u1[local_rows * rank * grid_dimension + (local_rows - 1) * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
+    //      devo ricevere la prima riga di u1 del rank successivo e memorizzarla nella riga di u1 successiva all'ultima riga occupata
+    //      MPI_Recv(&u1[local_rows * rank * grid_dimension + local_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     //  }
         u0=u1;
         iterations++;
