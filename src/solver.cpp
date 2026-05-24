@@ -56,7 +56,7 @@ Solution solve_pde(ProblemData d){
     //          MPI_Send(&rows_to_rank[rank - 1], 1, MPI_INT, i, 0, MPI_COMM_WORLD);
     //      }
     //      else {
-    //          MPI_Recv(&local_rows, 1, MPI_INT, 0, 0, MPI_STATUS_IGNORE);
+    //          MPI_Recv(&local_rows, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     //      }
     // }
     // 
@@ -81,15 +81,21 @@ Solution solve_pde(ProblemData d){
                 sum += std::pow(u1[i * grid_dimension + j] - u0[i * grid_dimension + j],2);
             }
         }
-        // MPI_Allreduce(&u1, MPI_IN_PLACE, grid_dimension * grid_dimension, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        // MPI_Allreduce(&sum, MPI_IN_PLACE, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         error = std::sqrt(h*sum);
-        // MPI_Allreduce(&error, MPI_IN_PLACE, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-
+    //  if (rank != 0) {
+    //      MPI_Send(&u1[local_rows * rank * grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
+    //      MPI_Recv(&u1[local_rows * rank * grid_dimension - grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    //  }
+    // if (rank != size - 1) {
+    //      MPI_Send(&u1[local_rows * rank * grid_dimension + (local_rows - 1) * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD)
+    //      MPI_Recv(&u1[local_rows * rank * grid_dimension + local_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE)
+    //  }
         u0=u1;
         iterations++;
     }
-  
+    // MPI_Allreduce(&u1, MPI_IN_PLACE, grid_dimension * grid_dimension, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    // MPI_Allreduce(&iterations, MPI_IN_PLACE, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+
     Solution s;
     
     s.u=u1;
