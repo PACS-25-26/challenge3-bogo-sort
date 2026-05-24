@@ -17,7 +17,7 @@ Solution solve_pde(ProblemData d){
     // if (rank == 0) {
     //      std::cout << "Type the number of elements desired: "
     //      std::cin >> n;
-    //}
+    // }
     // sostituire questa riga che permette solo dimensioni pari della griglia
     int grid_dimension = std::pow(2,d.nref)+1;
     // int grid_dimension = n;
@@ -26,15 +26,12 @@ Solution solve_pde(ProblemData d){
     // questi saranno i vettori global
     Vector u1(grid_dimension * grid_dimension,0);
     Vector u0(grid_dimension * grid_dimension,0);
-    // MPI_Bcast(&u1, grid_dimension * grid_dimension, MPI_DOUBLE, 0, MPI_COMM_WORLD);
-    // MPI_Bcast(&u0, grid_dimension * grid_dimension, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+    
     std::cout << grid_dimension << std::endl;
     int iterations = 0;
-    // MPI_Bcast(&iterations, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     // questo sarà l'errore globale
     double error = d.tol + 1;
-    // MPI_Bcast(&error, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
     // questa sarà la griglia globale
     std::vector<std::vector<double>> grid(grid_dimension * grid_dimension);
@@ -47,10 +44,12 @@ Solution solve_pde(ProblemData d){
     // while (remainder > 0) {
     //      rows_to_rank[remainder] += 1;
     //      remainder--;
-    //}
+    // }
     // MPI_Bcast(&rows_to_rank, 4, MPI_INT, 0, MPI_COMM_WORLD);
+    // int local_rows = rows_to_rank[rank];
+    //
     // in questo modo creo un vettore contenente quante righe assegnare ad ogni processo e poi broadcasto il vettore. seppur questo vettore non 
-    // pesa molto, può essere inutile che tutti i processi conoscano tutte le righe per ogni processo: si può fare solo Send e Receive tipo:
+    // pesi molto, può essere inutile che tutti i processi conoscano tutte le righe per ogni processo: si può fare solo Send e Receive tipo:
     // int local_rows;
     // for (i = 0; i < size; ++i) {
     //      if (rank == 0) {
@@ -72,9 +71,6 @@ Solution solve_pde(ProblemData d){
             }
         }
 
-
-
-    // bisogna broadcastare la tolleranza
     while(error > d.tol and iterations<d.max_iter){
         double sum = 0;
         for(int i = 1;i < grid_dimension - 1;i++){ // for (int i = local_rows * rank + 1; i < local_rows * rank + local_rows - 1; ++i)
