@@ -8,7 +8,7 @@
 
 
 Solution solve_pde(ProblemData d){
-    // MPI_Initialize(int argc, char* argv[]);
+    // MPI_Init(int argc, char* argv[]);
     // int rank, size;
     // MPI_Comm_rank(&rank);
     // MPI_Comm_size(&size);
@@ -52,9 +52,13 @@ Solution solve_pde(ProblemData d){
     // in questo modo creo un vettore contenente quante righe assegnare ad ogni processo e poi broadcasto il vettore. seppur questo vettore non 
     // pesa molto, può essere inutile che tutti i processi conoscano tutte le righe per ogni processo: si può fare solo Send e Receive tipo:
     // int local_rows;
-    // if (rank == 0) {
-    //      MPI_Send(&rows_to_rank[rank - 1], 1, MPI_INT, rank, 0, MPI_COMM_WORLD);
-    //      MPI_Recv(&local_rows, 1, MPI_INT, 0, 0, MPI_STATUS_IGNORE);
+    // for (i = 0; i < size; ++i) {
+    //      if (rank == 0) {
+    //          MPI_Send(&rows_to_rank[rank - 1], 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+    //      }
+    //      else {
+    //          MPI_Recv(&local_rows, 1, MPI_INT, 0, 0, MPI_STATUS_IGNORE);
+    //      }
     // }
     // 
     // int local_cols = grid_dimension;
@@ -73,14 +77,15 @@ Solution solve_pde(ProblemData d){
     // bisogna broadcastare la tolleranza
     while(error > d.tol and iterations<d.max_iter){
         double sum = 0;
-        for(int i = 1;i < grid_dimension - 1;i++){ // sostituire grid_dimension con local_rows
-            for(int j = 1;j < grid_dimension - 1;j++){ // sostituire grid_dimension con local_cols (== grid_dimension)
+        for(int i = 1;i < grid_dimension - 1;i++){ // for (int i = local_rows * rank + 1; i < local_rows * rank + local_rows - 1; ++i)
+            for(int j = 1;j < grid_dimension - 1;j++){ // for (j = 1; j < local_cols; ++j)
                 u1[i * grid_dimension + j] = (0.25) * (u0[(i + 1) * grid_dimension + j] +u0[(i - 1) * grid_dimension + j]
                                                              +u0[i * grid_dimension + j + 1] +u0[i * grid_dimension + j - 1] 
                                                              +d.f(grid[i * grid_dimension + j])* h * h);
                 sum += std::pow(u1[i * grid_dimension + j] - u0[i * grid_dimension + j],2);
             }
         }
+        // MPI_Allreduce(&u1, MPI_IN_PLACE, grid_dimension * grid_dimension, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         // MPI_Allreduce(&sum, MPI_IN_PLACE, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
         error = std::sqrt(h*sum);
         // MPI_Allreduce(&error, MPI_IN_PLACE, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
