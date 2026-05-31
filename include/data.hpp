@@ -25,7 +25,7 @@ struct ProblemData{
         return 0*x[0];
     };
 
-    int ne=11;
+    int ne=200;
     int max_iter=1E6;
 
     double tol=1E-6;
@@ -38,6 +38,7 @@ struct Solution{
     double h;
     std::vector<std::vector<double>> grid;
     int n_iter;
+    double time;
 
 };
 

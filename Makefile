@@ -5,7 +5,7 @@ CXX = mpicxx
 INC_DIR = include
 SRC_DIR = src
 
-CXXFLAGS = -std=c++20 -Wall -Wextra -O3 -I$(INC_DIR)
+CXXFLAGS = -std=c++20 -Wall -Wextra -O3 -I$(INC_DIR) -fopenmp
 
 SRCS = $(wildcard $(SRC_DIR)/*.cpp)
 OBJS = $(SRCS:.cpp=.o)

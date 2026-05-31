@@ -6,10 +6,18 @@
 #include <vector>
 #include <iostream>
 #include <mpi.h>
+#include <fstream>
+#include <string>
+#include <omp.h>
+
 
 
 Solution solve_pde(ProblemData d, int argc, char* argv[]) {
     MPI_Init(&argc, &argv);
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    double t_start = MPI_Wtime();
+
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
@@ -75,15 +83,12 @@ Solution solve_pde(ProblemData d, int argc, char* argv[]) {
     int local_cols = grid_dimension;
     //
     // 
-    // #pragma omp parallel {
-    // #pragma omp for
-    for(int i = 0;i < grid_dimension;i++){ // sostituire grid_dimension con local_rows
-            // #pragma omp for shared(grid, d)
-            for(int j = 0;j < grid_dimension;j++){ // sostituire grid_dimension con local_cols (== grid_dimension)
-                grid[i * grid_dimension + j]={d.x0 + i * h, d.y0 + j * h};
-            }
+    #pragma omp parallel for //num_threads(2)
+        for(int i = 0;i < grid_dimension;i++){ // sostituire grid_dimension con local_rows
+                for(int j = 0;j < grid_dimension;j++){ // sostituire grid_dimension con local_cols (== grid_dimension)
+                    grid[i * grid_dimension + j]={d.x0 + i * h, d.y0 + j * h};
+                }
         }
-    // }
 
     while(error > d.tol and iterations < d.max_iter){
         double sum = 0;
@@ -101,18 +106,17 @@ Solution solve_pde(ProblemData d, int argc, char* argv[]) {
     //      devo ricevere la prima riga di u1 del rank successivo e memorizzarla nella riga di u1 successiva all'ultima riga occupata
         MPI_Recv(&u0[local_previous_rows * grid_dimension + local_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
-        // #pragma omp parallel {
-        // #pragma omp for 
-        for (int i = local_previous_rows + skip_start_row; i < local_previous_rows + local_rows - skip_end_row; ++i) { // for (int i = local_rows * rank + 1; i < local_rows * rank + local_rows - 1; ++i)
-            // #pragma omp for shared(sum, u0, u1, d)reduction(+:sum)
-            for (int j = 1; j < local_cols - 1; ++j) { // for (j = 1; j < local_cols - 1; ++j)
-                u1[i * grid_dimension + j] = (0.25) * (u0[(i + 1) * grid_dimension + j] +u0[(i - 1) * grid_dimension + j]
-                                                             +u0[i * grid_dimension + j + 1] +u0[i * grid_dimension + j - 1] 
-                                                             +d.f(grid[i * grid_dimension + j])* h * h);
-                sum += std::pow(u1[i * grid_dimension + j] - u0[i * grid_dimension + j],2);
+        #pragma omp parallel for reduction(+:sum) //num_threads(2) 
+            for (int i = local_previous_rows + skip_start_row; i < local_previous_rows + local_rows - skip_end_row; ++i) { // for (int i = local_rows * rank + 1; i < local_rows * rank + local_rows - 1; ++i)
+                
+                for (int j = 1; j < local_cols - 1; ++j) { // for (j = 1; j < local_cols - 1; ++j)
+                    u1[i * grid_dimension + j] = (0.25) * (u0[(i + 1) * grid_dimension + j] +u0[(i - 1) * grid_dimension + j]
+                                                                +u0[i * grid_dimension + j + 1] +u0[i * grid_dimension + j - 1] 
+                                                                +d.f(grid[i * grid_dimension + j])* h * h);
+                    sum += std::pow(u1[i * grid_dimension + j] - u0[i * grid_dimension + j],2);
+                }
             }
-        }
-    //  }
+
         error = std::sqrt(h*sum);
         u0 = u1;
         iterations++;
@@ -123,7 +127,21 @@ Solution solve_pde(ProblemData d, int argc, char* argv[]) {
      
     MPI_Allreduce(MPI_IN_PLACE, u1.data(), grid_dimension * grid_dimension, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     
+    MPI_Barrier(MPI_COMM_WORLD);
+    
+    double t_end = MPI_Wtime();
+
+    double local_time = t_end - t_start;
+    double total_time;
+
+    MPI_Allreduce(&local_time, &total_time, 1, MPI_DOUBLE,
+           MPI_MAX, MPI_COMM_WORLD);
+    if (rank == 0) {
+        std::cout << "Execution time: " << total_time << " seconds\n";
+    }
     MPI_Finalize();
+
+    
 
     Solution s;
     
@@ -132,14 +150,11 @@ Solution solve_pde(ProblemData d, int argc, char* argv[]) {
     s.grid=grid;
     s.grid_dimension=grid_dimension;
     s.h=h;
+    s.time=total_time;
     return s;
 }
 
 
-#include <iostream>
-#include <fstream>
-#include <vector>
-#include <string>
 
 void create_vtk(const std::string& filename, const std::vector<double>& u, int n, double h) {
     std::ofstream out(filename);
