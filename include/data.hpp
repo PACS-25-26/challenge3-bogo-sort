@@ -10,7 +10,8 @@ using Vector = std::vector<double>;
 using Function = std::function<double(const Vector&)>;
 
 
-struct ProblemData{
+struct ProblemData {
+
     double x0=0,x1=1,y0=0,y1=1;
 
     Function f = [](const Vector& x) -> double {
@@ -25,14 +26,15 @@ struct ProblemData{
         return 0*x[0];
     };
 
-    int ne=200;
+    int ne=128;
     int max_iter=1E6;
 
     double tol=1E-6;
 };
 
 
-struct Solution{
+struct Solution {
+
     Vector u;
     int grid_dimension;
     double h;

@@ -1,6 +1,4 @@
 #include "solver.hpp"
-
-
 #include <functional>
 #include <cmath>
 #include <vector>
@@ -10,33 +8,32 @@
 #include <string>
 #include <omp.h>
 
-
-
-Solution solve_pde(ProblemData d, int argc, char* argv[]) {
-    MPI_Init(&argc, &argv);
+Solution solve_pde(ProblemData d, bool par) {
 
     MPI_Barrier(MPI_COMM_WORLD);
     double t_start = MPI_Wtime();
 
     int rank, size;
+
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    //int n;
-    //if (rank == 0) {
-    //      std::cout << "Type the number of elements desired: "
-    //      std::cin >> n;
-    //}
-    // sostituire questa riga che permette solo dimensioni pari della griglia
+    if (!par) {
+        size = 1;
+        omp_set_num_threads(1);
+        if (rank != 0) {
+            return Solution{};
+        }
+    }
+
     int grid_dimension = d.ne;
-    // int grid_dimension = n;
+
     double h = (d.x1 - d.x0) / (grid_dimension - 1);
 
     // questi saranno i vettori global
     Vector u1(grid_dimension * grid_dimension, 0);
     Vector u0(grid_dimension * grid_dimension, 0);
     
-    //std::cout << grid_dimension << std::endl;
     int iterations = 0;
 
     // questo sarà l'errore globale
@@ -44,12 +41,12 @@ Solution solve_pde(ProblemData d, int argc, char* argv[]) {
 
     // questa sarà la griglia globale
     std::vector<std::vector<double>> grid(grid_dimension * grid_dimension);
-    // std::vector<std::vector<double>> global_grid( ... );
 
     // per implementare la divisione delle righe tra i processi anche se le righe (e quindi le colonne) sono dispari, si usa la strategia:
     int proc = grid_dimension / size;
     int remainder = grid_dimension % size;
     std::vector<int> rows_to_rank(size, proc);
+
     while (remainder > 0) {
         rows_to_rank[remainder] += 1;
         remainder--;
@@ -62,99 +59,99 @@ Solution solve_pde(ProblemData d, int argc, char* argv[]) {
         }
     }
     
-    MPI_Bcast(rows_to_rank.data(), size, MPI_INT, 0, MPI_COMM_WORLD);
     int local_rows = rows_to_rank[rank];
     int local_previous_rows = previous_rows[rank];
     int skip_start_row = (rank != 0) ? 0 : 1;
     int skip_end_row = (rank != size - 1) ? 0 : 1;
-    //
-    // in questo modo creo un vettore contenente quante righe assegnare ad ogni processo e poi broadcasto il vettore. seppur questo vettore non 
-    // pesi molto, può essere inutile che tutti i processi conoscano tutte le righe per ogni processo: si può fare solo Send e Receive tipo:
-    // int local_rows;
-    // for (i = 0; i < size; ++i) {
-    //      if (rank == 0) {
-    //          MPI_Send(&rows_to_rank[rank - 1], 1, MPI_INT, i, 0, MPI_COMM_WORLD);
-    //      }
-    //      else {
-    //          MPI_Recv(&local_rows, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    //      }
-    // }
-    // 
+
+    // in questo modo creo: 
+    // - rows_to_rank, ovvero un vettore contenente il numero di righe destinate ad ogni rank;
+    // - previous_rows, ovvero un vettore che contiene in posizione i il numero di righe precedenti al rank i 
+    // - skip_start_row e skip_end_row, ovvero due valori che servono al primo rank per farlo partire una riga dopo e all'ultimo per farlo fermare una riga prima 
+
     int local_cols = grid_dimension;
-    //
-    // 
-    #pragma omp parallel for //num_threads(2)
-        for(int i = 0;i < grid_dimension;i++){ // sostituire grid_dimension con local_rows
-                for(int j = 0;j < grid_dimension;j++){ // sostituire grid_dimension con local_cols (== grid_dimension)
-                    grid[i * grid_dimension + j]={d.x0 + i * h, d.y0 + j * h};
-                }
+
+    #pragma omp parallel for collapse(2)
+    for(int i = 0; i < grid_dimension;i++) { // sostituire grid_dimension con local_rows
+        for(int j = 0; j < grid_dimension;j++) { // sostituire grid_dimension con local_cols (== grid_dimension)
+            grid[i * grid_dimension + j]={d.x0 + i * h, d.y0 + j * h};
+        }
+    }
+
+    double sum = 0;
+
+    #pragma omp parallel
+    {
+    while(error > d.tol and iterations < d.max_iter) {
+        sum = 0;
+
+        #pragma omp single 
+        {
+        //  il rank 0 non ha rank precedenti
+        if (rank != 0 && par) {
+        //  devo inviare la prima riga di u1 del mio rank al rank precedente
+            MPI_Send(&u0[local_previous_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
+        //  devo ricevere l'ultima riga di u1 del rank precedente e memorizzarla nella riga di u1 precedente alla prima riga occupata
+            MPI_Recv(&u0[local_previous_rows * grid_dimension - grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
+        // il rank massimo non ha rank successivi
+        if (rank != size - 1 && par) {
+        //  devo inviare l'ultima riga di u1 del mio rank al rank successivo
+            MPI_Send(&u0[local_previous_rows * grid_dimension + (local_rows - 1) * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
+        //  devo ricevere la prima riga di u1 del rank successivo e memorizzarla nella riga di u1 successiva all'ultima riga occupata
+            MPI_Recv(&u0[local_previous_rows * grid_dimension + local_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        }
         }
 
-    while(error > d.tol and iterations < d.max_iter){
-        double sum = 0;
-    //  il rank 0 non ha rank precedenti
-    if (rank != 0) {
-    //  devo inviare la prima riga di u1 del mio rank al rank precedente
-        MPI_Send(&u0[local_previous_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
-    //      devo ricevere l'ultima riga di u1 del rank precedente e memorizzarla nella riga di u1 precedente alla prima riga occupata
-        MPI_Recv(&u0[local_previous_rows * grid_dimension - grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    }
-    // il rank massimo non ha rank successivi
-    if (rank != size - 1) {
-    //      devo inviare l'ultima riga di u1 del mio rank al rank successivo
-        MPI_Send(&u0[local_previous_rows * grid_dimension + (local_rows - 1) * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
-    //      devo ricevere la prima riga di u1 del rank successivo e memorizzarla nella riga di u1 successiva all'ultima riga occupata
-        MPI_Recv(&u0[local_previous_rows * grid_dimension + local_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    }
-        #pragma omp parallel for reduction(+:sum) //num_threads(2) 
-            for (int i = local_previous_rows + skip_start_row; i < local_previous_rows + local_rows - skip_end_row; ++i) { // for (int i = local_rows * rank + 1; i < local_rows * rank + local_rows - 1; ++i)
-                
-                for (int j = 1; j < local_cols - 1; ++j) { // for (j = 1; j < local_cols - 1; ++j)
-                    u1[i * grid_dimension + j] = (0.25) * (u0[(i + 1) * grid_dimension + j] +u0[(i - 1) * grid_dimension + j]
-                                                                +u0[i * grid_dimension + j + 1] +u0[i * grid_dimension + j - 1] 
-                                                                +d.f(grid[i * grid_dimension + j])* h * h);
-                    sum += std::pow(u1[i * grid_dimension + j] - u0[i * grid_dimension + j],2);
-                }
+        #pragma omp for reduction(+:sum) collapse(2) schedule(static)
+        for (int i = local_previous_rows + skip_start_row; i < local_previous_rows + local_rows - skip_end_row; ++i) { // for (int i = local_rows * rank + 1; i < local_rows * rank + local_rows - 1; ++i)
+            for (int j = 1; j < local_cols - 1; ++j) { // for (j = 1; j < local_cols - 1; ++j)
+                u1[i * grid_dimension + j] = (0.25) * (u0[(i + 1) * grid_dimension + j] + u0[(i - 1) * grid_dimension + j] + u0[i * grid_dimension + j + 1] + u0[i * grid_dimension + j - 1] + d.f(grid[i * grid_dimension + j])* h * h);
+                sum += std::pow(u1[i * grid_dimension + j] - u0[i * grid_dimension + j],2);
             }
-
-        error = std::sqrt(h*sum);
+        }
+        #pragma omp single 
+        {
+        error = std::sqrt(h * sum);
         u0 = u1;
         iterations++;
 
-        MPI_Allreduce(MPI_IN_PLACE, &error, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-        MPI_Allreduce(MPI_IN_PLACE, &iterations, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        if (par) {
+            MPI_Allreduce(MPI_IN_PLACE, &error, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+            MPI_Allreduce(MPI_IN_PLACE, &iterations, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        }
+        }
     }
-     
-    MPI_Allreduce(MPI_IN_PLACE, u1.data(), grid_dimension * grid_dimension, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    }
     
-    MPI_Barrier(MPI_COMM_WORLD);
+    if (par)
+        MPI_Allreduce(MPI_IN_PLACE, u1.data(), grid_dimension * grid_dimension, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    
+    // il seguente pezzo di codice serve solo per misurare il tempo impiegato dall'esecuzione
+    if (par)
+        MPI_Barrier(MPI_COMM_WORLD);
     
     double t_end = MPI_Wtime();
 
     double local_time = t_end - t_start;
-    double total_time;
 
-    MPI_Allreduce(&local_time, &total_time, 1, MPI_DOUBLE,
-           MPI_MAX, MPI_COMM_WORLD);
-    if (rank == 0) {
-        std::cout << "Execution time: " << total_time << " seconds\n";
-    }
-    MPI_Finalize();
+    if (par)
+        MPI_Allreduce(MPI_IN_PLACE, &local_time, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
-    
+    //if (rank == 0) {
+    //    std::cout << "Execution time: " << local_time << " seconds\n";
+    //}
 
     Solution s;
     
-    s.u=u1;
-    s.n_iter=iterations;
-    s.grid=grid;
-    s.grid_dimension=grid_dimension;
-    s.h=h;
-    s.time=total_time;
+    s.u = u1;
+    s.n_iter = iterations;
+    s.grid = grid;
+    s.grid_dimension = grid_dimension;
+    s.h = h;
+    s.time = local_time;
     return s;
 }
-
-
 
 void create_vtk(const std::string& filename, const std::vector<double>& u, int n, double h) {
     std::ofstream out(filename);
@@ -190,5 +187,5 @@ void create_vtk(const std::string& filename, const std::vector<double>& u, int n
     }
 
     out.close();
-    std::cout << "File " << filename << " saved!" << std::endl;
+    //std::cout << "File " << filename << " saved!" << std::endl;
 }
