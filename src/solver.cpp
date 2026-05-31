@@ -5,29 +5,30 @@
 #include <cmath>
 #include <vector>
 #include <iostream>
+#include <mpi.h>
 
 
-Solution solve_pde(ProblemData d){
-    // MPI_Init(int argc, char* argv[]);
-    // int rank, size;
-    // MPI_Comm_rank(&rank);
-    // MPI_Comm_size(&size);
+Solution solve_pde(ProblemData d, int argc, char* argv[]) {
+    MPI_Init(&argc, &argv);
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    // int n;
-    // if (rank == 0) {
+    //int n;
+    //if (rank == 0) {
     //      std::cout << "Type the number of elements desired: "
     //      std::cin >> n;
-    // }
+    //}
     // sostituire questa riga che permette solo dimensioni pari della griglia
-    int grid_dimension = std::pow(2,d.nref)+1;
+    int grid_dimension = d.ne;
     // int grid_dimension = n;
-    double h = (d.x1-d.x0) / (grid_dimension-1);
+    double h = (d.x1 - d.x0) / (grid_dimension - 1);
 
     // questi saranno i vettori global
-    Vector u1(grid_dimension * grid_dimension,0);
-    Vector u0(grid_dimension * grid_dimension,0);
+    Vector u1(grid_dimension * grid_dimension, 0);
+    Vector u0(grid_dimension * grid_dimension, 0);
     
-    std::cout << grid_dimension << std::endl;
+    //std::cout << grid_dimension << std::endl;
     int iterations = 0;
 
     // questo sarà l'errore globale
@@ -37,16 +38,27 @@ Solution solve_pde(ProblemData d){
     std::vector<std::vector<double>> grid(grid_dimension * grid_dimension);
     // std::vector<std::vector<double>> global_grid( ... );
 
-    // per implementare la divisione delle righe tra i processi anche se le righe (e quindi le colonne sono dispari), si usa la strategia:
-    // int proc = grid_dimension / size;
-    // int remainder = grid_dimension % size;
-    // std::vector<int> rows_to_rank(size, proc);
-    // while (remainder > 0) {
-    //      rows_to_rank[remainder] += 1;
-    //      remainder--;
-    // }
-    // MPI_Bcast(&rows_to_rank, 4, MPI_INT, 0, MPI_COMM_WORLD);
-    // int local_rows = rows_to_rank[rank];
+    // per implementare la divisione delle righe tra i processi anche se le righe (e quindi le colonne) sono dispari, si usa la strategia:
+    int proc = grid_dimension / size;
+    int remainder = grid_dimension % size;
+    std::vector<int> rows_to_rank(size, proc);
+    while (remainder > 0) {
+        rows_to_rank[remainder] += 1;
+        remainder--;
+    }
+    
+    std::vector<int> previous_rows(size, 0);
+    for (int i = 1; i < size; ++i) {
+        for (int j = i; j < size; ++j) {
+            previous_rows[j] += rows_to_rank[i - 1]; 
+        }
+    }
+    
+    MPI_Bcast(rows_to_rank.data(), size, MPI_INT, 0, MPI_COMM_WORLD);
+    int local_rows = rows_to_rank[rank];
+    int local_previous_rows = previous_rows[rank];
+    int skip_start_row = (rank != 0) ? 0 : 1;
+    int skip_end_row = (rank != size - 1) ? 0 : 1;
     //
     // in questo modo creo un vettore contenente quante righe assegnare ad ogni processo e poi broadcasto il vettore. seppur questo vettore non 
     // pesi molto, può essere inutile che tutti i processi conoscano tutte le righe per ogni processo: si può fare solo Send e Receive tipo:
@@ -60,47 +72,58 @@ Solution solve_pde(ProblemData d){
     //      }
     // }
     // 
-    // int local_cols = grid_dimension;
-    // MPI_Bcast(&local_cols, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    int local_cols = grid_dimension;
     //
     // 
-
+    // #pragma omp parallel {
+    // #pragma omp for
     for(int i = 0;i < grid_dimension;i++){ // sostituire grid_dimension con local_rows
+            // #pragma omp for shared(grid, d)
             for(int j = 0;j < grid_dimension;j++){ // sostituire grid_dimension con local_cols (== grid_dimension)
                 grid[i * grid_dimension + j]={d.x0 + i * h, d.y0 + j * h};
             }
         }
+    // }
 
-    while(error > d.tol and iterations<d.max_iter){
+    while(error > d.tol and iterations < d.max_iter){
         double sum = 0;
-        for(int i = 1;i < grid_dimension - 1;i++){ // for (int i = local_rows * rank + 1; i < local_rows * rank + local_rows - 1; ++i)
-            for(int j = 1;j < grid_dimension - 1;j++){ // for (j = 1; j < local_cols; ++j)
+    //  il rank 0 non ha rank precedenti
+    if (rank != 0) {
+    //  devo inviare la prima riga di u1 del mio rank al rank precedente
+        MPI_Send(&u0[local_previous_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
+    //      devo ricevere l'ultima riga di u1 del rank precedente e memorizzarla nella riga di u1 precedente alla prima riga occupata
+        MPI_Recv(&u0[local_previous_rows * grid_dimension - grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+    // il rank massimo non ha rank successivi
+    if (rank != size - 1) {
+    //      devo inviare l'ultima riga di u1 del mio rank al rank successivo
+        MPI_Send(&u0[local_previous_rows * grid_dimension + (local_rows - 1) * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
+    //      devo ricevere la prima riga di u1 del rank successivo e memorizzarla nella riga di u1 successiva all'ultima riga occupata
+        MPI_Recv(&u0[local_previous_rows * grid_dimension + local_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+        // #pragma omp parallel {
+        // #pragma omp for 
+        for (int i = local_previous_rows + skip_start_row; i < local_previous_rows + local_rows - skip_end_row; ++i) { // for (int i = local_rows * rank + 1; i < local_rows * rank + local_rows - 1; ++i)
+            // #pragma omp for shared(sum, u0, u1, d)reduction(+:sum)
+            for (int j = 1; j < local_cols - 1; ++j) { // for (j = 1; j < local_cols - 1; ++j)
                 u1[i * grid_dimension + j] = (0.25) * (u0[(i + 1) * grid_dimension + j] +u0[(i - 1) * grid_dimension + j]
                                                              +u0[i * grid_dimension + j + 1] +u0[i * grid_dimension + j - 1] 
                                                              +d.f(grid[i * grid_dimension + j])* h * h);
                 sum += std::pow(u1[i * grid_dimension + j] - u0[i * grid_dimension + j],2);
             }
         }
+    //  }
         error = std::sqrt(h*sum);
-    //  il rank 0 non ha rank precedenti
-    //  if (rank != 0) {
-    //      devo inviare la prima riga di u1 del mio rank al rank precedente
-    //      MPI_Send(&u1[local_rows * rank * grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
-    //      devo ricevere l'ultima riga di u1 del rank precedente e memorizzarla nella riga di u1 precedente alla prima riga occupata
-    //      MPI_Recv(&u1[local_rows * rank * grid_dimension - grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    //  }
-    // il rank massimo non ha rank successivi
-    // if (rank != size - 1) {
-    //      devo inviare l'ultima riga di u1 del mio rank al rank successivo
-    //      MPI_Send(&u1[local_rows * rank * grid_dimension + (local_rows - 1) * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
-    //      devo ricevere la prima riga di u1 del rank successivo e memorizzarla nella riga di u1 successiva all'ultima riga occupata
-    //      MPI_Recv(&u1[local_rows * rank * grid_dimension + local_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    //  }
-        u0=u1;
+        u0 = u1;
         iterations++;
+
+        MPI_Allreduce(MPI_IN_PLACE, &error, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+        MPI_Allreduce(MPI_IN_PLACE, &iterations, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
     }
-    // MPI_Allreduce(&u1, MPI_IN_PLACE, grid_dimension * grid_dimension, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-    // MPI_Allreduce(&iterations, MPI_IN_PLACE, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+     
+    MPI_Allreduce(MPI_IN_PLACE, u1.data(), grid_dimension * grid_dimension, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    
+    MPI_Finalize();
 
     Solution s;
     
@@ -110,7 +133,6 @@ Solution solve_pde(ProblemData d){
     s.grid_dimension=grid_dimension;
     s.h=h;
     return s;
-    // MPI_Finalize();
 }
 
 

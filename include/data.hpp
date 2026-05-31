@@ -25,7 +25,7 @@ struct ProblemData{
         return 0*x[0];
     };
 
-    int nref=6;
+    int ne=11;
     int max_iter=1E6;
 
     double tol=1E-6;
