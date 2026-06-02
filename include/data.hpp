@@ -41,6 +41,7 @@ struct Solution {
     std::vector<std::vector<double>> grid;
     int n_iter;
     double time;
+    double err;
 
 };
 

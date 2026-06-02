@@ -25,6 +25,10 @@ Solution solve_pde(ProblemData d, bool par) {
             return Solution{};
         }
     }
+    else { // && Mode == OPTIMIZED
+        int n_threads = omp_get_num_procs() / size;
+        omp_set_num_threads(n_threads);
+    }
 
     int grid_dimension = d.ne;
 
@@ -79,11 +83,13 @@ Solution solve_pde(ProblemData d, bool par) {
     }
 
     double sum = 0;
+    //double e = 0;
 
     #pragma omp parallel
     {
     while(error > d.tol and iterations < d.max_iter) {
         sum = 0;
+        //e = 0;
 
         #pragma omp single 
         {
@@ -108,6 +114,7 @@ Solution solve_pde(ProblemData d, bool par) {
             for (int j = 1; j < local_cols - 1; ++j) { // for (j = 1; j < local_cols - 1; ++j)
                 u1[i * grid_dimension + j] = (0.25) * (u0[(i + 1) * grid_dimension + j] + u0[(i - 1) * grid_dimension + j] + u0[i * grid_dimension + j + 1] + u0[i * grid_dimension + j - 1] + d.f(grid[i * grid_dimension + j])* h * h);
                 sum += std::pow(u1[i * grid_dimension + j] - u0[i * grid_dimension + j],2);
+                //e += std::pow(d.f(grid[i * grid_dimension + j]) - u1[i * grid_dimension + j], 2);
             }
         }
         #pragma omp single 
@@ -124,8 +131,10 @@ Solution solve_pde(ProblemData d, bool par) {
     }
     }
     
-    if (par)
+    if (par) {
         MPI_Allreduce(MPI_IN_PLACE, u1.data(), grid_dimension * grid_dimension, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+        //MPI_Allreduce(MPI_IN_PLACE, &e, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
+    }
     
     // il seguente pezzo di codice serve solo per misurare il tempo impiegato dall'esecuzione
     if (par)
@@ -150,6 +159,8 @@ Solution solve_pde(ProblemData d, bool par) {
     s.grid_dimension = grid_dimension;
     s.h = h;
     s.time = local_time;
+    //s.err = e;
+
     return s;
 }
 
@@ -189,3 +200,58 @@ void create_vtk(const std::string& filename, const std::vector<double>& u, int n
     out.close();
     //std::cout << "File " << filename << " saved!" << std::endl;
 }
+
+/* std::vector<double> solver::solver< s, m, bc, proc, thr>::set_boundary_conditions( ... ) {
+    if (constexpr m == DIRICHLET) {
+        u = set_dirichlet_boundary_conditions( ... )
+    }
+    if (constexpr m == NEUMANN) {
+        u = set_neumann_boundary_conditions( ... )
+    }
+    if (constexpr m == ROBIN) {
+        u = set_robin_boundary_conditions( ... )
+    }
+
+}
+
+std::vector<double> solver::solver< s, m, bc, proc, thr>::set_dirichlet_boundary_conditions( ... ) {
+    if (rank == 0) {
+        for (int i = 0; i < grid_dimension - 1; ++i)
+            u[i] = ...
+    }
+    for (int i = skip_start_row; i < local_rows - skip_end_row; ++i) {
+        u[grid_dimension * (local_previous_rows + i)] = ...
+        u[grid_dimension * (local_previous_rows + i) + grid_dimension - 1] = ...
+    }
+    if (rank == size - 1) {
+        for (int i = 0; i < grid_dimension - 1; ++i)
+            u[grid_dimension * (grid_dimension - 1) + i] = ...
+    }
+}
+
+std::vector<double> solver::solver< s, m, bc, proc, thr>::set_neumann_boundary_conditions( ... ) {
+    if (rank == 0) {
+        u1[0] = 0.25 * (2 * u0[1] + 2 * u0[grid_dimension] - 2 * h * (d.g(grid[ ... ]) + d.g(grid[ ... ]))) - h * h * d.f(grid[ ... ]));
+
+        for (int i = 1; i < grid_dimension - 1; ++i) 
+            u1[i] = 0.25 * (2 * u0[i + grid_dimension] - 2 * h * d.g(grid[ ... ]) + u0[i - 1] + u0[i + 1] - h * h * d.f(grid[ ... ]));
+
+        u1[grid_dimension - 1] = 0.25 * (2 * u0[grid_dimension - 2] + 2 * u0[grid_dimension + grid_dimension - 1] + 2 * h * (d.g(grid[ ... ]) - d.g(grid[ ... ]))) - h * h * d.f(grid[ ... ]));
+    }
+    
+    for (int i = skip_start_row; i < local_rows - skip_end_row; ++i) {
+        u1[grid_dimension * (local_previous_rows + i)] = 0.25 * (2 * u0[grid_dimension * (local_previous_rows + i) + 1] - 2 * h * d.g(grid[ ... ]) + u0[grid_dimension * (local_previous_rows + i - 1)] + u0[grid_dimension * (local_previous_rows + i + 1)] - h * h * d.f(grid[ ... ]));
+        u1[grid_dimension * (local_previous_rows + i) + grid_dimension - 1] = 0.25 * (2 * u0[grid_dimension * (local_previous_rows + i) + grid_dimension - 2] + 2 * h * d.g(grid[ ... ]) + u0[grid_dimension * (local_previous_rows + i - 1) + grid_dimension - 1] + u0[grid_dimension * (local_previous_rows + i + 1) + grid_dimension - 1] - h * h * d.f(grid[ ... ]));
+    }
+
+    if (rank == size - 1) {
+        u1[grid_dimension * (grid_dimension - 1)] = 0.25 * (2 * u0[grid_dimension * (grid_dimension - 1) + 1] + 2 * u0[grid_dimension * (grid_dimension - 2)] - 2 * h * (d.g(grid[ ... ]) - d.g(grid[ ... ]))) - h * h * d.f(grid[ ... ]));
+
+        for (int i = 1; i < grid_dimension - 1; ++i)
+            u1[grid_dimension * (grid_dimension - 1) + i] = 0.25 * (2 * u0[grid_dimension * (grid_dimension - 1) + i - grid_dimension] + u0[grid_dimension * (grid_dimension - 1) + i - 1] + u0[grid_dimension * (grid_dimension - 1) + i + 1] + 2 * h * d.g(grid[ ... ]) - h * h * d.f(grid[ ... ]));
+
+        u1[grid_dimension * grid_dimension - 1] = 0.25 * (2 * u0[grid_dimension * grid_dimension - 2] + 2 * u0[grid_dimension * (grid_dimension - 1) - grid_dimension] + 2 * h * (d.g(grid[ ... ]) + d.g(grid[ ... ]))) - h * h * d.f(grid[ ... ]));
+    }
+}
+
+*/
