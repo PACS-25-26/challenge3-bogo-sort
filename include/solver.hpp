@@ -10,12 +10,6 @@ enum SolverMethod {
     SCHWARZ;
 }
 
-enum BoundaryConditions {
-    HOM_DIRICHLET
-    NON_HOM_DIRICHLET
-    NEUMANN
-    ROBIN
-}
 
 enum Mode {
     OPTIMIZED
@@ -23,22 +17,20 @@ enum Mode {
 }
 
 namespace solver {
-template <SolverMethod s, Mode m, BoundaryConditions bc, int Processors = 1, int Threads = 1>
-class solver {
-    private:
-    std::vector<std::vector<double>> create_mesh( ... )
-    std::vector<double> set_dirichlet_boundary_conditions( ... )
-    std::vector<double> set_neumann_boundary_conditions( ... )
-    std::vector<double> set_robin_boundary_conditions( ... )
-    std::vector<double> set_boundary_conditions( ... )
+    template <SolverMethod s, Mode m, int Processors = 1, int Threads = 1>
+    class pdeSolver {
+        private:
+            ProblemData d;
+        public:
 
-    public:
-    Solution solve_pde( ... )
-    double compute_error( ... )
-    void print_solution( ... )
+            virtual Solution solve_pde( ... ) = 0;
+            double compute_error( ... )
+            void create_vtk( ... );
+    }
 }
-*/
 
+*/
+double compute_error(ProblemData d, Solution s);
 Solution solve_pde(ProblemData d, bool par);
 void create_vtk(const std::string& filename, const std::vector<double>& u, int n, double h);
 

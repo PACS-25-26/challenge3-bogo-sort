@@ -22,13 +22,12 @@ struct ProblemData {
         return sin(2*M_PI*x[0])*sin(2*M_PI*x[1]);
     };
 
-    Function dir_cond = [](const Vector& x) -> double {
+    Function bound_cond = [](const Vector& x) -> double {
         return 0*x[0];
     };
 
-    int ne=128;
+    int ne=256;
     int max_iter=1E6;
-
     double tol=1E-6;
 };
 

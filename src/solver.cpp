@@ -8,6 +8,8 @@
 #include <string>
 #include <omp.h>
 
+
+
 Solution solve_pde(ProblemData d, bool par) {
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -82,6 +84,31 @@ Solution solve_pde(ProblemData d, bool par) {
         }
     }
 
+    if (local_previous_rows == 0) {
+        #pragma omp parallel for
+        for (int j = 0; j < grid_dimension; ++j)
+            u0[j] = d.bound_cond(grid[j]);
+        }
+
+    // bottom row (ultima riga globale) se il rank possiede l'ultima riga
+    if (local_previous_rows + local_rows == grid_dimension) {
+        int base = grid_dimension * (grid_dimension - 1);
+        #pragma omp parallel for
+        for (int j = 0; j < grid_dimension; ++j)
+            u0[base + j] = d.bound_cond(grid[base + j]);
+    }
+
+    // prime/ultime colonne per le righe locali
+    #pragma omp parallel for
+    for (int i = local_previous_rows; i < local_previous_rows + local_rows; ++i) {
+        u0[i * grid_dimension + 0] = d.bound_cond(grid[i * grid_dimension + 0]);
+        u0[i * grid_dimension + (grid_dimension - 1)] = d.bound_cond(grid[i * grid_dimension + (grid_dimension - 1)]);
+    }
+
+    u1=u0;
+
+
+
     double sum = 0;
     //double e = 0;
 
@@ -117,6 +144,8 @@ Solution solve_pde(ProblemData d, bool par) {
                 //e += std::pow(d.f(grid[i * grid_dimension + j]) - u1[i * grid_dimension + j], 2);
             }
         }
+
+
         #pragma omp single 
         {
         error = std::sqrt(h * sum);
@@ -159,7 +188,7 @@ Solution solve_pde(ProblemData d, bool par) {
     s.grid_dimension = grid_dimension;
     s.h = h;
     s.time = local_time;
-    //s.err = e;
+    s.err = compute_error(d, s);
 
     return s;
 }
@@ -171,25 +200,19 @@ void create_vtk(const std::string& filename, const std::vector<double>& u, int n
         return;
     }
 
-    // 1. Intestazione obbligatoria
     out << "# vtk DataFile Version 3.0\n";
     out << "Soluzione Equazione di Poisson 2D\n";
     out << "ASCII\n";
     out << "DATASET STRUCTURED_POINTS\n";
 
-    // 2. Geometria della griglia (nX, nY, nZ)
-    // Usiamo n nodi per X e Y, e 1 solo nodo per Z visto che siamo in 2D
     out << "DIMENSIONS " << n << " " << n << " 1\n";
     out << "ORIGIN 0.0 0.0 0.0\n";
     out << "SPACING " << h << " " << h << " 0.0\n";
 
-    // 3. Dati dei nodi
     out << "POINT_DATA " << n * n << "\n";
     out << "SCALARS u double 1\n";
     out << "LOOKUP_TABLE default\n";
 
-    // 4. Scrittura dei valori
-    // ATTENZIONE: VTK vuole prima la X che varia (colonne j) e poi la Y (righe i)
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
             int idx = i * n + j; // Adatta questo indice alla struttura della tua matrice
@@ -198,8 +221,23 @@ void create_vtk(const std::string& filename, const std::vector<double>& u, int n
     }
 
     out.close();
-    //std::cout << "File " << filename << " saved!" << std::endl;
+    std::cout << "File " << filename << " saved!" << std::endl;
 }
+
+double compute_error(ProblemData d, Solution s) {
+    double error = 0.0;
+    for (int i = 0; i < s.grid_dimension; ++i) {
+        for (int j = 0; j < s.grid_dimension; ++j) {
+            int idx = i * s.grid_dimension + j;
+            error += std::pow(d.uex(s.grid[idx]) - s.u[idx], 2);
+        }
+    }
+    return std::sqrt(error);
+
+}
+
+
+
 
 /* std::vector<double> solver::solver< s, m, bc, proc, thr>::set_boundary_conditions( ... ) {
     if (constexpr m == DIRICHLET) {
