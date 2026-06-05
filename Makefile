@@ -23,4 +23,11 @@ $(SRC_DIR)/%.o: $(SRC_DIR)/%.cpp $(DEPS)
 clean:
 	rm -f $(SRC_DIR)/*.o $(TARGET)
 
+
 .PHONY: all clean
+
+.PHONY: doc
+doc:
+	doxygen Doxyfile
+
+

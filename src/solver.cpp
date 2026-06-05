@@ -1,3 +1,10 @@
+/**
+* @file solver.cpp
+* @brief this file contains the implementation of the functions declared in solver.hpp, 
+* which are used to solve the PDE with dirichlet boundary conditions and to create a VTK file for visualization.
+*/
+
+
 #include "solver.hpp"
 #include <functional>
 #include <cmath>
@@ -13,13 +20,14 @@
 Solution solve_pde(ProblemData d, bool par) {
 
     MPI_Barrier(MPI_COMM_WORLD);
-    double t_start = MPI_Wtime();
+    double t_start = MPI_Wtime(); //used to measure the execution time
 
     int rank, size;
 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+    //Setting the number of threads for OpenMP and making the code serial if par is false.
     if (!par) {
         size = 1;
         omp_set_num_threads(1);
@@ -27,7 +35,7 @@ Solution solve_pde(ProblemData d, bool par) {
             return Solution{};
         }
     }
-    else { // && Mode == OPTIMIZED
+    else {
         int n_threads = omp_get_num_procs() / size;
         omp_set_num_threads(n_threads);
     }
@@ -36,19 +44,19 @@ Solution solve_pde(ProblemData d, bool par) {
 
     double h = (d.x1 - d.x0) / (grid_dimension - 1);
 
-    // questi saranno i vettori global
+    // global vectors containing the solution at the current and previous iteration, inizialized with 0
     Vector u1(grid_dimension * grid_dimension, 0);
     Vector u0(grid_dimension * grid_dimension, 0);
     
     int iterations = 0;
 
-    // questo sarà l'errore globale
     double error = d.tol + 1;
 
-    // questa sarà la griglia globale
+    // global grid
     std::vector<std::vector<double>> grid(grid_dimension * grid_dimension);
 
-    // per implementare la divisione delle righe tra i processi anche se le righe (e quindi le colonne) sono dispari, si usa la strategia:
+    // dividing the grid among the processes, handling the reminder 
+    // in case the grid dimension is not perfectly divisible by the number of processes
     int proc = grid_dimension / size;
     int remainder = grid_dimension % size;
     std::vector<int> rows_to_rank(size, proc);
@@ -58,6 +66,8 @@ Solution solve_pde(ProblemData d, bool par) {
         remainder--;
     }
     
+    // creating a vector that contains the number of rows assigned to the previous ranks, in order to know from
+    //where each rank has to start its computation
     std::vector<int> previous_rows(size, 0);
     for (int i = 1; i < size; ++i) {
         for (int j = i; j < size; ++j) {
@@ -65,24 +75,23 @@ Solution solve_pde(ProblemData d, bool par) {
         }
     }
     
+    //initializing variables that will be used in the main loop so that every rank knows which elements it need to skip in the computation
     int local_rows = rows_to_rank[rank];
     int local_previous_rows = previous_rows[rank];
     int skip_start_row = (rank != 0) ? 0 : 1;
     int skip_end_row = (rank != size - 1) ? 0 : 1;
 
-    // in questo modo creo: 
-    // - rows_to_rank, ovvero un vettore contenente il numero di righe destinate ad ogni rank;
-    // - previous_rows, ovvero un vettore che contiene in posizione i il numero di righe precedenti al rank i 
-    // - skip_start_row e skip_end_row, ovvero due valori che servono al primo rank per farlo partire una riga dopo e all'ultimo per farlo fermare una riga prima 
-
+    
     int local_cols = grid_dimension;
 
+    // creating the grid
     #pragma omp parallel for collapse(2)
-    for(int i = 0; i < grid_dimension;i++) { // sostituire grid_dimension con local_rows
-        for(int j = 0; j < grid_dimension;j++) { // sostituire grid_dimension con local_cols (== grid_dimension)
+    for(int i = 0; i < grid_dimension;i++) { 
+        for(int j = 0; j < grid_dimension;j++) { 
             grid[i * grid_dimension + j]={d.x0 + i * h, d.y0 + j * h};
         }
     }
+    // setting Dirichlet boundary conditions
 
     if (local_previous_rows == 0) {
         #pragma omp parallel for
@@ -90,7 +99,7 @@ Solution solve_pde(ProblemData d, bool par) {
             u0[j] = d.bound_cond(grid[j]);
         }
 
-    // bottom row (ultima riga globale) se il rank possiede l'ultima riga
+    
     if (local_previous_rows + local_rows == grid_dimension) {
         int base = grid_dimension * (grid_dimension - 1);
         #pragma omp parallel for
@@ -98,44 +107,43 @@ Solution solve_pde(ProblemData d, bool par) {
             u0[base + j] = d.bound_cond(grid[base + j]);
     }
 
-    // prime/ultime colonne per le righe locali
+    
     #pragma omp parallel for
     for (int i = local_previous_rows; i < local_previous_rows + local_rows; ++i) {
         u0[i * grid_dimension + 0] = d.bound_cond(grid[i * grid_dimension + 0]);
         u0[i * grid_dimension + (grid_dimension - 1)] = d.bound_cond(grid[i * grid_dimension + (grid_dimension - 1)]);
     }
 
+
+
     u1=u0;
 
 
 
     double sum = 0;
-    //double e = 0;
 
+    //main loop of the Jacobi method
     #pragma omp parallel
     {
     while(error > d.tol and iterations < d.max_iter) {
         sum = 0;
-        //e = 0;
+        
 
         #pragma omp single 
         {
-        //  il rank 0 non ha rank precedenti
+        //  communicating boundary rows between processes
         if (rank != 0 && par) {
-        //  devo inviare la prima riga di u1 del mio rank al rank precedente
             MPI_Send(&u0[local_previous_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD);
-        //  devo ricevere l'ultima riga di u1 del rank precedente e memorizzarla nella riga di u1 precedente alla prima riga occupata
             MPI_Recv(&u0[local_previous_rows * grid_dimension - grid_dimension], grid_dimension, MPI_DOUBLE, rank - 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
-        // il rank massimo non ha rank successivi
+        
         if (rank != size - 1 && par) {
-        //  devo inviare l'ultima riga di u1 del mio rank al rank successivo
             MPI_Send(&u0[local_previous_rows * grid_dimension + (local_rows - 1) * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD);
-        //  devo ricevere la prima riga di u1 del rank successivo e memorizzarla nella riga di u1 successiva all'ultima riga occupata
             MPI_Recv(&u0[local_previous_rows * grid_dimension + local_rows * grid_dimension], grid_dimension, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
         }
         }
 
+        // updatinh the solution
         #pragma omp for reduction(+:sum) collapse(2) schedule(static)
         for (int i = local_previous_rows + skip_start_row; i < local_previous_rows + local_rows - skip_end_row; ++i) { // for (int i = local_rows * rank + 1; i < local_rows * rank + local_rows - 1; ++i)
             for (int j = 1; j < local_cols - 1; ++j) { // for (j = 1; j < local_cols - 1; ++j)
@@ -145,7 +153,7 @@ Solution solve_pde(ProblemData d, bool par) {
             }
         }
 
-
+        //computing the error and updating the solution for the next iteration
         #pragma omp single 
         {
         error = std::sqrt(h * sum);
@@ -162,10 +170,9 @@ Solution solve_pde(ProblemData d, bool par) {
     
     if (par) {
         MPI_Allreduce(MPI_IN_PLACE, u1.data(), grid_dimension * grid_dimension, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-        //MPI_Allreduce(MPI_IN_PLACE, &e, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     }
     
-    // il seguente pezzo di codice serve solo per misurare il tempo impiegato dall'esecuzione
+    // measuring the execution time
     if (par)
         MPI_Barrier(MPI_COMM_WORLD);
     
@@ -176,10 +183,8 @@ Solution solve_pde(ProblemData d, bool par) {
     if (par)
         MPI_Allreduce(MPI_IN_PLACE, &local_time, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
-    //if (rank == 0) {
-    //    std::cout << "Execution time: " << local_time << " seconds\n";
-    //}
-
+    
+    // assembling the solution in a struct to return it
     Solution s;
     
     s.u = u1;
@@ -215,7 +220,7 @@ void create_vtk(const std::string& filename, const std::vector<double>& u, int n
 
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
-            int idx = i * n + j; // Adatta questo indice alla struttura della tua matrice
+            int idx = i * n + j;
             out << u[idx] << "\n";
         }
     }
@@ -235,61 +240,3 @@ double compute_error(ProblemData d, Solution s) {
     return std::sqrt(error);
 
 }
-
-
-
-
-/* std::vector<double> solver::solver< s, m, bc, proc, thr>::set_boundary_conditions( ... ) {
-    if (constexpr m == DIRICHLET) {
-        u = set_dirichlet_boundary_conditions( ... )
-    }
-    if (constexpr m == NEUMANN) {
-        u = set_neumann_boundary_conditions( ... )
-    }
-    if (constexpr m == ROBIN) {
-        u = set_robin_boundary_conditions( ... )
-    }
-
-}
-
-std::vector<double> solver::solver< s, m, bc, proc, thr>::set_dirichlet_boundary_conditions( ... ) {
-    if (rank == 0) {
-        for (int i = 0; i < grid_dimension - 1; ++i)
-            u[i] = ...
-    }
-    for (int i = skip_start_row; i < local_rows - skip_end_row; ++i) {
-        u[grid_dimension * (local_previous_rows + i)] = ...
-        u[grid_dimension * (local_previous_rows + i) + grid_dimension - 1] = ...
-    }
-    if (rank == size - 1) {
-        for (int i = 0; i < grid_dimension - 1; ++i)
-            u[grid_dimension * (grid_dimension - 1) + i] = ...
-    }
-}
-
-std::vector<double> solver::solver< s, m, bc, proc, thr>::set_neumann_boundary_conditions( ... ) {
-    if (rank == 0) {
-        u1[0] = 0.25 * (2 * u0[1] + 2 * u0[grid_dimension] - 2 * h * (d.g(grid[ ... ]) + d.g(grid[ ... ]))) - h * h * d.f(grid[ ... ]));
-
-        for (int i = 1; i < grid_dimension - 1; ++i) 
-            u1[i] = 0.25 * (2 * u0[i + grid_dimension] - 2 * h * d.g(grid[ ... ]) + u0[i - 1] + u0[i + 1] - h * h * d.f(grid[ ... ]));
-
-        u1[grid_dimension - 1] = 0.25 * (2 * u0[grid_dimension - 2] + 2 * u0[grid_dimension + grid_dimension - 1] + 2 * h * (d.g(grid[ ... ]) - d.g(grid[ ... ]))) - h * h * d.f(grid[ ... ]));
-    }
-    
-    for (int i = skip_start_row; i < local_rows - skip_end_row; ++i) {
-        u1[grid_dimension * (local_previous_rows + i)] = 0.25 * (2 * u0[grid_dimension * (local_previous_rows + i) + 1] - 2 * h * d.g(grid[ ... ]) + u0[grid_dimension * (local_previous_rows + i - 1)] + u0[grid_dimension * (local_previous_rows + i + 1)] - h * h * d.f(grid[ ... ]));
-        u1[grid_dimension * (local_previous_rows + i) + grid_dimension - 1] = 0.25 * (2 * u0[grid_dimension * (local_previous_rows + i) + grid_dimension - 2] + 2 * h * d.g(grid[ ... ]) + u0[grid_dimension * (local_previous_rows + i - 1) + grid_dimension - 1] + u0[grid_dimension * (local_previous_rows + i + 1) + grid_dimension - 1] - h * h * d.f(grid[ ... ]));
-    }
-
-    if (rank == size - 1) {
-        u1[grid_dimension * (grid_dimension - 1)] = 0.25 * (2 * u0[grid_dimension * (grid_dimension - 1) + 1] + 2 * u0[grid_dimension * (grid_dimension - 2)] - 2 * h * (d.g(grid[ ... ]) - d.g(grid[ ... ]))) - h * h * d.f(grid[ ... ]));
-
-        for (int i = 1; i < grid_dimension - 1; ++i)
-            u1[grid_dimension * (grid_dimension - 1) + i] = 0.25 * (2 * u0[grid_dimension * (grid_dimension - 1) + i - grid_dimension] + u0[grid_dimension * (grid_dimension - 1) + i - 1] + u0[grid_dimension * (grid_dimension - 1) + i + 1] + 2 * h * d.g(grid[ ... ]) - h * h * d.f(grid[ ... ]));
-
-        u1[grid_dimension * grid_dimension - 1] = 0.25 * (2 * u0[grid_dimension * grid_dimension - 2] + 2 * u0[grid_dimension * (grid_dimension - 1) - grid_dimension] + 2 * h * (d.g(grid[ ... ]) + d.g(grid[ ... ]))) - h * h * d.f(grid[ ... ]));
-    }
-}
-
-*/

@@ -69,5 +69,7 @@ Testing/
 .cache/
 
 main
-output/
+output/test1.vtk
 test/results.txt
+/html
+/latex

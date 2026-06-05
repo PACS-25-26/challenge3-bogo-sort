@@ -1,3 +1,8 @@
+/**
+* @file data.hpp
+* @brief header file for the problem data
+*/
+
 #ifndef DATA_HPP
 #define DATA_HPP
 
