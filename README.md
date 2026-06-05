@@ -32,7 +32,7 @@ Here we see that if the grid is not big the parallel implementations is slower, 
 
 Inside the folder test we made a script that runs several times the program with different numbers of MPI cores (and thus different number of openMP threads since they are strictly correlated in our program). The resluts of this tests are stored in a file called results.txt, and there we can see which combination of MPI cores and openMP threads is the most efficient. We see that increasing the MPI cores reduces the time taken by the program to run, until a certain point where we reach a stall when we try to use more computational power than the one we have on our pc.
 The test we did where on a mesh with 256 elements per side.
-To run it it' enough to go on the folder challenge3-bogo-sort and type bash 'test/scalability_test.sh'
+To run it it' enough to go on the folder challenge3-bogo-sort and type `bash test/scalability_test.sh`
 
 These were Angelone's results:
 MPI_PROCS    TIME(s)         ERROR           ITER        
@@ -46,5 +46,5 @@ In this case we see that the optimal number of processors is around 4, and the s
 
 These were Gnagnetti's results:
 
-
+In the folder test one can see hardware information for both our computers.
 
