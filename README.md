@@ -35,6 +35,7 @@ The test we did where on a mesh with 256 elements per side.
 To run it it' enough to go on the folder challenge3-bogo-sort and type `bash test/scalability_test.sh`
 
 These were Angelone's results:
+
 MPI_PROCS    TIME(s)         ERROR           ITER        
 1            23.6544         0.0461303       25671       
 2            20.8746         0.0679198       24529       
