@@ -1,3 +1,8 @@
+/**
+* @file scalability_test.cpp
+* @brief main file to test the scalability of the parallel code
+*/
+
 #include "data.hpp"
 #include "solver.hpp"
 #include <iostream>

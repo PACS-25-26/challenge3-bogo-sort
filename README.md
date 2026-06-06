@@ -37,13 +37,12 @@ To run it it' enough to go on the folder challenge3-bogo-sort and type `bash tes
 These were Angelone's results:
 
 MPI_PROCS    TIME(s)         ERROR           ITER        
-1            23.6544         0.0461303       25671       
-2            20.8746         0.0679198       24529       
-4            8.91771         0.0982928       23401       
-8            8.35291         0.109401        23069       
-16           N/A             N/A             N/A    
+1            13.7472         0.0461303       25671       
+2            14.4996         0.0679198       24529       
+4            7.37407         0.0982928       23401       
+8            5.98818         0.109401        23069       
+16           N/A             N/A             N/A     
 
-In this case we see that the optimal number of processors is around 4, and the speed of the problem doesn't improve much after that.
 
 These were Gnagnetti's results:
 
@@ -54,5 +53,6 @@ MPI_PROCS    TIME(s)         ERROR           ITER
 8            4.96365         0.109401        23069       
 16           N/A             N/A             N/A    
 
+In both cases it seems that the optimal efficiency is reached using many MPI processes, even though it could mean using less openMP threads
 In the folder test one can see hardware information for both our computers.
 
