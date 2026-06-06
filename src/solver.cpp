@@ -143,13 +143,12 @@ Solution solve_pde(ProblemData d, bool par) {
         }
         }
 
-        // updatinh the solution
+        // updating the solution
         #pragma omp for reduction(+:sum) collapse(2) schedule(static)
-        for (int i = local_previous_rows + skip_start_row; i < local_previous_rows + local_rows - skip_end_row; ++i) { // for (int i = local_rows * rank + 1; i < local_rows * rank + local_rows - 1; ++i)
-            for (int j = 1; j < local_cols - 1; ++j) { // for (j = 1; j < local_cols - 1; ++j)
+        for (int i = local_previous_rows + skip_start_row; i < local_previous_rows + local_rows - skip_end_row; ++i) {
+            for (int j = 1; j < local_cols - 1; ++j) {
                 u1[i * grid_dimension + j] = (0.25) * (u0[(i + 1) * grid_dimension + j] + u0[(i - 1) * grid_dimension + j] + u0[i * grid_dimension + j + 1] + u0[i * grid_dimension + j - 1] + d.f(grid[i * grid_dimension + j])* h * h);
                 sum += std::pow(u1[i * grid_dimension + j] - u0[i * grid_dimension + j],2);
-                //e += std::pow(d.f(grid[i * grid_dimension + j]) - u1[i * grid_dimension + j], 2);
             }
         }
 

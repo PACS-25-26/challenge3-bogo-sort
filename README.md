@@ -47,5 +47,12 @@ In this case we see that the optimal number of processors is around 4, and the s
 
 These were Gnagnetti's results:
 
+MPI_PROCS    TIME(s)         ERROR           ITER        
+1            12.9537         0.0461303       25671       
+2            13.0974         0.0679198       24529       
+4            6.88114         0.0982928       23401       
+8            4.96365         0.109401        23069       
+16           N/A             N/A             N/A    
+
 In the folder test one can see hardware information for both our computers.
 
